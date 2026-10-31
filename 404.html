@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>fish are friends</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Gochi+Hand&display=swap">
+<style>
+body { margin: 0; min-height: 100vh; display: grid; place-items: center; background: #fff; color: #111; font: 300 16px/1.6 "Helvetica Neue", Helvetica, Arial, sans-serif }
+form { display: grid; gap: .8rem; justify-items: start; padding: 1.5rem }
+h1 { font: 2.6rem/1 "Gochi Hand", cursive; margin: 0 0 .4rem }
+input { font: inherit; border: 2px solid #111; border-radius: 8px; padding: .3rem .6rem; width: 14rem }
+button { font: 1rem "Gochi Hand", cursive; border: 2px solid #111; border-radius: 999px; padding: .1rem .9rem; background: #fff; cursor: pointer }
+button:hover { background: #111; color: #fff }
+p { margin: 0; color: #8a8a8a; font-size: .9rem; min-height: 1.4em }
+svg { width: 64px; height: 64px; fill: none; stroke: #2f6fd6; stroke-width: 3; stroke-linecap: round; stroke-linejoin: round }
+</style>
+</head>
+<body>
+<form id="f">
+<svg viewBox="0 0 100 100"><path d="M24 16C10 16 7 36 11 48c3 8 7 12 10 16L12 82H36L27 64c3-4 7-8 10-16 4-12 1-32-13-32z"/><circle cx="21" cy="24" r="2.4" fill="#2f6fd6" stroke="none"/><path d="M25 32q5 3.5 10-2" stroke-width="2.5"/></svg>
+<h1>fish are friends</h1>
+<input id="p" type="password" autocomplete="current-password" placeholder="password" autofocus>
+<button>come in</button>
+<p id="m"></p>
+</form>
+<script>
+const m = document.getElementById('m'), f = document.getElementById('f'), p = document.getElementById('p')
+const coreP = fetch('/core.bin?v=a5d873450df7', { cache: 'no-cache' }).then(r => r.arrayBuffer())
+const mime = n => ({ css: 'text/css', js: 'text/javascript' })[n.split('.').pop()] || 'text/plain'
+const tiny = 'data:image/gif;base64,R0lGODlhAQABAAAAACw='
+let site = null
+const urls = {}, pending = {}
+const derive = async pw => new Uint8Array(await crypto.subtle.deriveBits({ name: 'PBKDF2', salt: new Uint8Array(await coreP).slice(0, 16), iterations: 600000, hash: 'SHA-256' }, await crypto.subtle.importKey('raw', new TextEncoder().encode(pw), 'PBKDF2', false, ['deriveBits']), 256))
+const open = async raw => {
+  const bin = new Uint8Array(await coreP)
+  const key = await crypto.subtle.importKey('raw', raw, 'AES-GCM', false, ['decrypt'])
+  const plain = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: bin.slice(16, 28) }, key, bin.slice(28))
+  const text = await new Response(new Blob([plain]).stream().pipeThrough(new DecompressionStream('gzip'))).text()
+  return { key, ...JSON.parse(text) }
+}
+const blobURL = rel => pending[rel] = pending[rel] || (async () => {
+  const [name, type] = site.blobs[rel]
+  const b = new Uint8Array(await (await fetch('/x/' + name + '.bin')).arrayBuffer())
+  const plain = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: b.slice(0, 12) }, site.key, b.slice(12))
+  return urls[rel] = URL.createObjectURL(new Blob([plain], { type }))
+})()
+const zoom = async rel => {
+  const o = document.createElement('div')
+  o.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.88);display:grid;place-items:center;z-index:99;cursor:zoom-out'
+  const i = document.createElement('img')
+  i.style.cssText = 'max-width:95vw;max-height:95vh;margin:0'
+  o.appendChild(i); o.onclick = () => o.remove(); document.body.appendChild(o)
+  i.src = await blobURL(rel)
+}
+const render = path => {
+  try { path = decodeURIComponent(path).normalize('NFC') } catch {}
+  path = path.replace(/^\//, '') || 'index.html'
+  if (site.files[path] === undefined && site.files[path.replace(/\/?$/, '/index.html')] !== undefined) path = path.replace(/\/?$/, '/index.html')
+  if (site.files[path] === undefined) path = site.files['404.html'] === undefined ? 'index.html' : '404.html'
+  return site.files[path].replace(/(src|href)=("?)\/([^"\s>#?]+)\2/g, (all, a, q, rel) => {
+    if (site.blobs[rel]) return a === 'src' ? `src="${urls[rel] || tiny}" data-enc="${rel}"` : `href="/${rel}" data-full="${rel}"`
+    if (site.files[rel] !== undefined && /\.(css|js)$/.test(rel)) return `${a}="${urls[rel] = urls[rel] || URL.createObjectURL(new Blob([site.files[rel]], { type: mime(rel) }))}"`
+    return all
+  })
+}
+const watch = root => {
+  const sheet = document.querySelector('main .page'), box = sheet && getComputedStyle(sheet).overflowY === 'auto' ? sheet : null
+  const make = r => { const io = new IntersectionObserver(es => es.forEach(e => { if (e.isIntersecting) { io.unobserve(e.target); blobURL(e.target.dataset.enc).then(u => { e.target.src = u }) } }), { root: r, rootMargin: '800px' }); return io }
+  const outer = make(null), inner = box ? make(box) : outer
+  root.querySelectorAll('img[data-enc]').forEach(i => urls[i.dataset.enc] ? i.src = urls[i.dataset.enc] : (box && box.contains(i) ? inner : outer).observe(i))
+}
+const show = path => {
+  const html = render(path)
+  document.open(); document.write(html); document.close()
+  watch(document)
+  addEventListener('load', () => watch(document), { once: true })
+  document.removeEventListener('click', window.lockClick); removeEventListener('popstate', window.lockPop)
+  window.lockClick = e => {
+    if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey) return
+    const a = e.target.closest('a[href]'); if (!a) return
+    if (a.dataset.full) { e.preventDefault(); zoom(a.dataset.full); return }
+    if (window.route) return
+    const h = a.getAttribute('href')
+    if (h.startsWith('/') && !h.startsWith('//')) { e.preventDefault(); history.pushState(null, '', h); show(h.split('#')[0]); if (h.includes('#')) location.hash = h.split('#')[1] }
+  }
+  window.lockPop = () => { if (!window.route) show(location.pathname) }
+  document.addEventListener('click', window.lockClick); addEventListener('popstate', window.lockPop)
+}
+window.lockGo = h => { if (window.route) return window.route(h); history.pushState(null, '', h); show(h.split('#')[0]) }
+const go = async raw => { site = await open(raw); window.lockFile = rel => site.files[rel]; window.lockPage = render; window.lockWatch = watch; sessionStorage.setItem('k', btoa(String.fromCharCode(...raw))); show(location.pathname) }
+if (!window.DecompressionStream) m.textContent = 'this browser is too old for the lock, try another'
+f.addEventListener('submit', async e => { e.preventDefault(); m.textContent = 'one sec'; try { await go(await derive(p.value)) } catch { m.textContent = 'not it'; p.select() } })
+try { if (sessionStorage.getItem('k')) go(Uint8Array.from(atob(sessionStorage.getItem('k')), c => c.charCodeAt(0))).catch(() => sessionStorage.removeItem('k')) } catch { sessionStorage.removeItem('k') }
+</script>
+</body>
+</html>
